@@ -1,5 +1,16 @@
 <?php
 
+use Drupal\Core\DrupalKernel;
+use Symfony\Component\HttpFoundation\Request;
+
+$globalConfig = SimpleSAML_Configuration::getInstance();
+if (!$globalConfig->getString('drupal.root', false)) {
+    throw new SimpleSAML_Error_Exception('drupal.root must be set in config.php.');
+}
+
+global $drupal_autoloader;
+$drupal_autoloader = require_once $globalConfig->getString('drupal.root') . '/web/autoload.php';
+
 /**
  * Drupal authentication source for simpleSAMLphp
  *
@@ -21,18 +32,18 @@
  * -------------------------------------------------------------------
  *
  * To use this put something like this into config/authsources.php:
- *	
- * 	'drupal-userpass' => array(
- * 		'drupalauth:UserPass',
+ *  
+ *  'drupal-userpass' => array(
+ *      'drupalauth:UserPass',
  * 
- * 		// The filesystem path of the Drupal directory.
- * 		'drupalroot' => '/var/www/drupal-7.0',
+ *      // The filesystem path of the Drupal directory.
+ *      'drupalroot' => '/var/www/drupal-7.0',
  * 
- * 		// Whether to turn on debug
- * 		'debug' => true,
+ *      // Whether to turn on debug
+ *      'debug' => true,
  * 
- * 		// Which attributes should be retrieved from the Drupal site.				     
- * 				     
+ *      // Which attributes should be retrieved from the Drupal site.                    
+ *                   
  *              'attributes' => array(
  *                                    array('drupaluservar'   => 'uid',  'callit' => 'uid'),
  *                                     array('drupaluservar' => 'name', 'callit' => 'cn'),
@@ -42,7 +53,7 @@
  *                                     array('drupaluservar' => 'field_organization','callit' => 'ou'),
  *                                     array('drupaluservar' => 'roles','callit' => 'roles'),
  *                                   ),
- * 	),
+ *  ),
  * 
  * Format of the 'attributes' array explained:
  *
@@ -50,11 +61,11 @@
  * all attributes are fetched.
  * 
  * If you want everything (except) the password hash do this:
- *  	'attributes' => NULL,
+ *      'attributes' => NULL,
  *
  * If you want to pick and choose do it like this:
  * 'attributes' => array(
- * 		      array('drupaluservar' => 'uid',  'callit' => 'uid),
+ *            array('drupaluservar' => 'uid',  'callit' => 'uid),
  *                     array('drupaluservar' => 'name', 'callit' => 'cn'),
  *                     array('drupaluservar' => 'mail', 'callit' => 'mail'),
  *                     array('drupaluservar' => 'roles','callit' => 'roles'),
@@ -75,21 +86,20 @@
  */
 class sspmod_drupalauth_Auth_Source_UserPass extends sspmod_core_Auth_UserPassBase {
 
-	/**
-	 * Whether to turn on debugging
-	 */
-	private $debug;
+    /**
+     * Whether to turn on debugging
+     */
+    private $debug;
 
-	/**
-	 * The Drupal installation directory
-	 */
-	private $drupalroot;
+    /**
+     * The Drupal installation directory
+     */
+    private $drupalroot;
 
-	/**
-	 * The Drupal user attributes to use, NULL means use all available
-	 */
-	private $attributes;
-
+    /**
+     * The Drupal user attributes to use, NULL means use all available
+     */
+    private $attributes;
 
 	/**
 	 * Constructor for this authentication source.
@@ -98,39 +108,31 @@ class sspmod_drupalauth_Auth_Source_UserPass extends sspmod_core_Auth_UserPassBa
 	 * @param array $config  Configuration.
 	 */
 	public function __construct($info, $config) {
-		assert('is_array($info)');
-		assert('is_array($config)');
+        global $drupal_autoloader;
+        assert('is_array($info)');
+        assert('is_array($config)');
 
-		/* Call the parent constructor first, as required by the interface. */
-		parent::__construct($info, $config);
-		
-		/* Get the configuration for this module */	
-		$drupalAuthConfig = new sspmod_drupalauth_ConfigHelper($config,
-			'Authentication source ' . var_export($this->authId, TRUE));
+        /* Call the parent constructor first, as required by the interface. */
+        parent::__construct($info, $config);
+        
+        /* Get the configuration for this module */ 
+        $drupalAuthConfig = new sspmod_drupalauth_ConfigHelper($config,
+            'Authentication source ' . var_export($this->authId, TRUE));
 
-		$this->debug      = $drupalAuthConfig->getDebug();
-		$this->attributes = $drupalAuthConfig->getAttributes();
+        $this->debug      = $drupalAuthConfig->getDebug();
+        $this->attributes = $drupalAuthConfig->getAttributes();
 
-    if (!defined('DRUPAL_ROOT')) {
-      define('DRUPAL_ROOT', $drupalAuthConfig->getDrupalroot());
-    }
-
-		/* Include the Drupal bootstrap */
-    //require_once(DRUPAL_ROOT.'/includes/common.inc');
-    require_once(DRUPAL_ROOT.'/includes/bootstrap.inc');
-		require_once(DRUPAL_ROOT.'/includes/file.inc');
-
-    /* Using DRUPAL_BOOTSTRAP_FULL means that SimpleSAMLphp must use an session storage
-     * mechanism other than phpsession (see: store.type in config.php). However, this trade-off
-     * prevents the need for hackery here and makes this module work better in different environments.
-     */
-		drupal_bootstrap(DRUPAL_BOOTSTRAP_FULL);
-		
-		// we need to be able to call Drupal user function so we load some required modules
-    drupal_load('module', 'system');
-		drupal_load('module', 'user');
-		drupal_load('module', 'field');
-
+        // Bootstrap Drupal to different levels
+        try {
+            $request = Request::createFromGlobals();
+            $kernel = DrupalKernel::createFromRequest($request, $drupal_autoloader, 'prod');
+            $kernel->boot();
+            $kernel->prepareLegacyRequest($request);
+            $this->em = $kernel->getContainer()->get('entity.manager');
+        }
+        catch (Exception $e) {
+            throw new Exception('Drupal bootstrap failed: '.$e->getMessage());
+        }
 	}
 
 
@@ -152,17 +154,53 @@ class sspmod_drupalauth_Auth_Source_UserPass extends sspmod_core_Auth_UserPassBa
 		assert('is_string($password)');
 
 		// authenticate the user
-		$drupaluid = user_authenticate($username, $password);
+        try {
+            $drupaluid = \Drupal::service('user.auth')->authenticate($username, $password);
+        }
+        catch (Exception $e) {
+            throw new Exception('Drupal service user.auth failed: '.$e->getMessage());
+        }
+
 		if(0 == $drupaluid){
 			throw new SimpleSAML_Error_Error('WRONGUSERPASS');
 		}
 
 		// load the user object from Drupal
-		$drupaluser = user_load($drupaluid);
+        try {
+            $accounts = $this->em->getStorage('user')->loadByProperties(array('name' => $username, 'status' => 1));
+            $drupaluser = reset($accounts);
+        }
+        catch (Exception $e) {
+            throw new Exception('Drupal user loadByProperties failed: '.$e->getMessage());
+        }
+        if (!$drupaluser || $drupaluser->isBlocked()) {
+            // user has been blocked
+            throw new SimpleSAML_Error_Error('WRONGUSERPASS');
+        }
 
-		// get all the attributes out of the user object
-		$userAttrs = get_object_vars($drupaluser);
-		
+        // get all the attributes out of the user object
+        $userAttrs = array(
+            'uuid' => $drupaluser->uuid(),
+            'id' => $drupaluser->id(),
+            'username' => $drupaluser->getAccountName(),
+            'email' => $drupaluser->getEmail(),
+            'displayname' => $drupaluser->getDisplayName(),
+            'roles' => $drupaluser->getRoles(),
+            // 'language' => $drupaluser->language()->id(),
+            'timezone' => $drupaluser->getTimeZone(),
+        );
+
+        foreach ($drupaluser->toArray() as $key => $value) {
+            if (preg_match('/^field_/', $key)) {
+                $userAttrs[$key] = '';
+                foreach ($value as $fv) {
+                    if (array_key_exists('value', $fv)) {
+                        $userAttrs[$key] = $fv['value'];
+                    }
+                }
+            }
+        }
+
 		// define some variables to use as arrays
 		$userAttrNames = null;
 		$attributes    = null;
@@ -217,10 +255,7 @@ class sspmod_drupalauth_Auth_Source_UserPass extends sspmod_core_Auth_UserPassBa
 
 		  }
 		}
-						    
 		return $attributes;
 	}
 
 }
-
-?>

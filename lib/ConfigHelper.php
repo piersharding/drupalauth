@@ -81,12 +81,14 @@ class sspmod_drupalauth_ConfigHelper {
 		/* Parse configuration. */
 		$config = SimpleSAML_Configuration::loadFromArray($config, $location);
 
-		$this->drupalroot = $config->getString('drupalroot');
+		// $this->drupalroot = $config->getString('drupalroot');
+        $globalConfig = SimpleSAML_Configuration::getInstance();
+        $this->drupalroot = $globalConfig->getString('drupal.root');
 		$this->debug = $config->getBoolean('debug', FALSE);
-    $this->attributes = $config->getArray('attributes', NULL);
-    $this->cookie_name = $config->getString('cookie_name', 'drupalauth4ssp');
-    $this->drupal_logout_url = $config->getString('drupal_logout_url', NULL);
-    $this->drupal_login_url = $config->getString('drupal_login_url', NULL);
+        $this->attributes = $config->getArray('attributes', NULL);
+        $this->cookie_name = $config->getString('cookie_name', 'drupalauth4ssp');
+        $this->drupal_logout_url = $config->getString('drupal_logout_url', NULL);
+        $this->drupal_login_url = $config->getString('drupal_login_url', NULL);
 
 	}
 	
